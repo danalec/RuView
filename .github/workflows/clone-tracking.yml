@@ -31,7 +31,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # GitHub's Traffic API is not reachable with the default GITHUB_TOKEN: it
+  # requires an Administration:read credential (a classic PAT with `repo`
+  # scope), so a plain GITHUB_TOKEN answers HTTP 403 "Resource not accessible
+  # by integration". Probe first so a repository without TRAFFIC_TOKEN skips
+  # the snapshot cleanly instead of failing the scheduled run.
+  preflight:
+    name: traffic-api-preflight
+    runs-on: ubuntu-latest
+    outputs:
+      available: ${{ steps.probe.outputs.available }}
+    steps:
+      - name: Probe Traffic API access
+        id: probe
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TRAFFIC_TOKEN: ${{ secrets.TRAFFIC_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          token="${TRAFFIC_TOKEN:-$GH_TOKEN}"
+          if [ -n "$token" ] && GH_TOKEN="$token" gh api "repos/$REPO/traffic/clones" >/dev/null 2>&1; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::The GitHub Traffic API is unreachable with the available token. Set a TRAFFIC_TOKEN secret (classic PAT with \`repo\` scope) to record clone/view snapshots."
+          fi
+
   snapshot:
+    needs: preflight
+    if: needs.preflight.outputs.available == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -40,7 +69,7 @@ jobs:
 
       - name: Fetch /traffic/clones + /traffic/views from GitHub
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ secrets.TRAFFIC_TOKEN || secrets.GITHUB_TOKEN }}
         run: |
           mkdir -p data
           gh api repos/${{ github.repository }}/traffic/clones > /tmp/clones.json

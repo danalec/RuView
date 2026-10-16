@@ -58,10 +58,19 @@ jobs:
           git add vendor/
           git commit -m "chore: update vendor submodules to latest upstream"
           git push origin "$BRANCH"
-          gh pr create \
+          # A fork, or any repo with "Allow GitHub Actions to create and approve
+          # pull requests" disabled, answers `gh pr create` with
+          # "GitHub Actions is not permitted to create or approve pull requests".
+          # The branch is already pushed at this point, so degrade to a warning
+          # that names the manual command instead of failing the cron run.
+          if gh pr create \
             --title "chore: update vendor submodules" \
             --body "Automated submodule update to the latest upstream commit on each submodule's tracked branch (see \`.gitmodules\`). Review the pointer diff before merging." \
             --base main \
-            --head "$BRANCH"
+            --head "$BRANCH"; then
+            echo "pull request opened for $BRANCH"
+          else
+            echo "::warning::Pushed $BRANCH but the workflow token cannot open pull requests (the repository forbids GitHub Actions from creating PRs, or the token lacks \`pull-requests: write\`). Open it manually: gh pr create --base main --head $BRANCH"
+          fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
