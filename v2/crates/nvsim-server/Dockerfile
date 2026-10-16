@@ -18,7 +18,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Copy a stub workspace Cargo.toml + Cargo.lock that only references
 # nvsim and nvsim-server. This dodges the full RuView workspace's
 # wifi-densepose-* deps, none of which nvsim-server uses.
+#
+# The real manifest is kept under a side name so the stub below can adopt its
+# [workspace.package] version. Hard-coding that version here drifts as soon as
+# the workspace is bumped, and the drift breaks nvsim-server's path+version
+# requirement on nvsim (nvsim = { path = "../nvsim", version = "..." }).
 COPY Cargo.lock Cargo.lock
+COPY Cargo.toml workspace.Cargo.toml.real
 COPY crates/nvsim crates/nvsim
 COPY crates/nvsim-server crates/nvsim-server
 
@@ -28,7 +34,7 @@ resolver = "2"
 members = ["crates/nvsim", "crates/nvsim-server"]
 
 [workspace.package]
-version = "0.3.0"
+version = "@WS_VERSION@"
 edition = "2021"
 authors = ["rUv <ruv@ruv.net>"]
 license = "MIT OR Apache-2.0"
@@ -46,6 +52,13 @@ tower = { version = "0.4", features = ["full"] }
 tower-http = { version = "0.5", features = ["cors", "trace", "compression-gzip"] }
 criterion = "0.5"
 EOF
+
+# Adopt the real workspace version so the stub cannot drift from it.
+RUN WS_VERSION="$(sed -n '/^\[workspace\.package\]/,/^\[/{s/^version *= *"\([^"]*\)".*/\1/p}' workspace.Cargo.toml.real | head -n1)" \
+ && test -n "$WS_VERSION" \
+ && echo "stub workspace version: $WS_VERSION" \
+ && sed -i "s|@WS_VERSION@|$WS_VERSION|" Cargo.toml \
+ && rm workspace.Cargo.toml.real
 
 RUN cargo build --release -p nvsim-server --bin nvsim-server
 
