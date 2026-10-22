@@ -1063,10 +1063,12 @@ static void process_frame(const edge_ring_slot_t *slot)
 {
     uint16_t n_subcarriers = slot->iq_len / 2;
     if (n_subcarriers == 0) return;
-    /* STBC frames carry LLTF + HT-LTF + a second STBC HT-LTF (192 entries on
-     * S3). The first 128 line up with plain HT20 frames; analyse those instead
-     * of dropping the frame (#2286). */
-    if (n_subcarriers > EDGE_MAX_SUBCARRIERS) n_subcarriers = EDGE_MAX_SUBCARRIERS;
+    /* S3 STBC frames append a second HT-LTF block (192 entries total).
+     * Process the bounded LLTF + HT-LTF prefix instead of starving edge
+     * output (#2286). Raw CSI streaming retains the complete payload. */
+    if (n_subcarriers > EDGE_MAX_SUBCARRIERS) {
+        n_subcarriers = EDGE_MAX_SUBCARRIERS;
+    }
 
     s_frame_count++;
     s_latest_rssi = slot->rssi;
