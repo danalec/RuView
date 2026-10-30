@@ -4,8 +4,13 @@ The contract is what keeps the documentation pointed at the release this tree
 builds: the guide states a version, and the repository either produces that
 version or the check fails. These tests cover the parsers and prove that a
 pointer left on an older prerelease is caught.
+
+Nothing here pins a firmware version. The current release is read from the tree,
+so a new release does not invalidate the suite - which is the failure this file
+had when 0.8.15 was written into it and the tree moved on.
 """
 from pathlib import Path
+import re
 import shutil
 import sys
 import tempfile
@@ -15,11 +20,14 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT / "scripts"))
 
 from esp32_release_pointer_contract import (  # noqa: E402
+    ARCHIVE,
     POINTER_DOCS,
     RELEASE_NOTES,
     RELEASE_WORKFLOW,
     VERSION_FILE,
     build_variants,
+    current_tag,
+    current_version,
     read,
     release_archives,
     release_versions,
@@ -27,8 +35,28 @@ from esp32_release_pointer_contract import (  # noqa: E402
     version_tuple,
 )
 
-CURRENT_TAG = "v0.8.15-esp32"
-STALE_TAG = "v0.8.14-esp32"
+CURRENT_VERSION = current_version(ROOT)
+CURRENT_TAG = current_tag(ROOT)
+
+
+def bumped_version(version):
+    """Return the next patch version above the one given."""
+    parts = version.split(".")
+    parts[-1] = str(int(parts[-1]) + 1)
+    return ".".join(parts)
+
+
+def stale_tag():
+    """Return the newest release tag the documents name below the current one."""
+    tags = release_versions(read(ROOT / POINTER_DOCS[0]))
+    older = [tag for tag in tags if tag != version_tuple(CURRENT_VERSION)]
+    if not older:
+        raise AssertionError("no older release tag is named in %s" % POINTER_DOCS[0])
+    newest = max(older)
+    return "v%s-esp32" % ".".join(str(part) for part in newest)
+
+
+STALE_TAG = stale_tag()
 
 
 def clone(target):
@@ -38,7 +66,7 @@ def clone(target):
         destination = target / relative
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, destination)
-    relative = RELEASE_NOTES + "/v0.8.15-esp32.md"
+    relative = RELEASE_NOTES + "/v%s-esp32.md" % CURRENT_VERSION
     source = ROOT / relative
     destination = target / relative
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -67,17 +95,24 @@ class Parsers(unittest.TestCase):
         self.assertEqual(release_versions("v0.3.0-alpha-esp32"), [])
 
     def test_the_workflow_variants_are_the_published_archives(self):
-        self.assertEqual(
-            build_variants(ROOT), ("8mb", "4mb", "c6-4mb")
-        )
+        variants = build_variants(ROOT)
+        self.assertTrue(variants)
         self.assertEqual(
             release_archives(ROOT),
-            (
-                "esp32-csi-node-firmware-8mb.tar.gz",
-                "esp32-csi-node-firmware-4mb.tar.gz",
-                "esp32-csi-node-firmware-c6-4mb.tar.gz",
+            tuple(
+                "esp32-csi-node-firmware-%s.tar.gz" % variant for variant in variants
             ),
         )
+        for relative in POINTER_DOCS:
+            named = set(ARCHIVE.findall(read(ROOT / relative)))
+            if not named:
+                # A document that names no archive is not judged on archives.
+                continue
+            self.assertEqual(
+                named,
+                set(release_archives(ROOT)),
+                relative,
+            )
 
 
 class TheRepository(unittest.TestCase):
@@ -108,18 +143,19 @@ class Drift(unittest.TestCase):
     def test_a_bumped_version_without_a_pointer_update_is_caught(self):
         with tempfile.TemporaryDirectory() as directory:
             tree = clone(Path(directory))
-            (tree / VERSION_FILE).write_text("0.8.16\n", encoding="utf-8")
+            bumped = bumped_version(CURRENT_VERSION)
+            (tree / VERSION_FILE).write_text(bumped + "\n", encoding="utf-8")
             failures = verify(tree)
             self.assertTrue(failures)
-            self.assertIn("release notes for 0.8.16", names(failures))
+            self.assertIn("release notes for %s" % bumped, names(failures))
 
     def test_a_missing_release_note_is_caught(self):
         with tempfile.TemporaryDirectory() as directory:
             tree = clone(Path(directory))
-            (tree / RELEASE_NOTES / "v0.8.15-esp32.md").unlink()
+            (tree / RELEASE_NOTES / ("v%s-esp32.md" % CURRENT_VERSION)).unlink()
             failures = verify(tree)
             self.assertTrue(failures)
-            self.assertIn("release notes for 0.8.15", names(failures))
+            self.assertIn("release notes for %s" % CURRENT_VERSION, names(failures))
 
     def test_an_archive_the_workflow_does_not_publish_is_caught(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -152,7 +188,7 @@ class Drift(unittest.TestCase):
             failures = verify(tree)
             self.assertTrue(failures)
             self.assertTrue(
-                any("names v0.8.15-esp32" in name for name in names(failures)),
+                any("names %s" % CURRENT_TAG in name for name in names(failures)),
                 names(failures),
             )
 
