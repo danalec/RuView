@@ -27,6 +27,7 @@
 
 #include "mmwave_sensor.h"
 #include "mmwave_detect.h"
+#include "mmwave_pins.h"
 
 #include <string.h>
 #include <math.h>
@@ -509,7 +510,13 @@ esp_err_t mmwave_sensor_init(int uart_tx_pin, int uart_rx_pin)
      * routed UART1 TX onto the console RX line and silently killed serial
      * input (USB onboarding, monitor commands) even when no sensor was found,
      * because uart_driver_delete() does not undo the GPIO matrix routing. */
-#if defined(CONFIG_IDF_TARGET_ESP32C6)
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    if (uart_tx_pin < 0 || uart_rx_pin < 0) {
+        s_running = false;
+        ESP_LOGI(TAG, "C5 mmWave probe disabled: explicit board-safe pins required");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
+#elif defined(CONFIG_IDF_TARGET_ESP32C6)
     if (uart_tx_pin < 0) uart_tx_pin = 4;
     if (uart_rx_pin < 0) uart_rx_pin = 5;
 #else
@@ -523,8 +530,17 @@ esp_err_t mmwave_sensor_init(int uart_tx_pin, int uart_rx_pin)
     const int console_tx = 16, console_rx = 17;   /* U0TXD / U0RXD IOMUX pins */
 #elif defined(CONFIG_IDF_TARGET_ESP32S3)
     const int console_tx = 43, console_rx = 44;
+#elif defined(CONFIG_IDF_TARGET_ESP32C5)
+    const int console_tx = 11, console_rx = 12;
 #else
     const int console_tx = 1, console_rx = 3;
+#endif
+#if defined(CONFIG_IDF_TARGET_ESP32C5)
+    if (!ruview_c5_mmwave_pins_safe(uart_tx_pin, uart_rx_pin, console_tx, console_rx)) {
+        s_running = false;
+        ESP_LOGW(TAG, "C5 mmWave pins overlap memory/console or are invalid; skipping probe");
+        return ESP_ERR_INVALID_ARG;
+    }
 #endif
     if (uart_tx_pin == console_tx || uart_tx_pin == console_rx ||
         uart_rx_pin == console_tx || uart_rx_pin == console_rx) {

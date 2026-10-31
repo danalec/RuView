@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+- **ESP32-C5 release candidate (hardware qualification pending).** Add a
+  headless IDF 6.0.2 C5 build and checksum-verified operator variant, use the
+  C5 ROM's `0x2000` bootloader address, and check image chip IDs and generated
+  flash layouts before packaging. The baseline keeps UART onboarding, a
+  conservative DSP rate, 2.4 GHz association, and no assumed LED/PSRAM wiring.
+  The C5 dependency graph excludes unused display libraries. No measured C5
+  runtime improvement or sensing accuracy is claimed.
+
 
 ### Community batch (PRs #2100-#2157 by aepod, reviewed and integrated)
 
